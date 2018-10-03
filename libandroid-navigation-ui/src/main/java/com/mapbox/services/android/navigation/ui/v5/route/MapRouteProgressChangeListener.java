@@ -10,25 +10,27 @@ import java.util.List;
 
 class MapRouteProgressChangeListener implements ProgressChangeListener {
 
-  private final NavigationMapRoute mapRoute;
+  private final MapRouteLine routeLine;
+  private final MapRouteArrow routeArrow;
 
-  MapRouteProgressChangeListener(NavigationMapRoute mapRoute) {
-    this.mapRoute = mapRoute;
+  MapRouteProgressChangeListener(MapRouteLine routeLine, MapRouteArrow routeArrow) {
+    this.routeLine = routeLine;
+    this.routeArrow = routeArrow;
   }
 
   @Override
   public void onProgressChange(Location location, RouteProgress routeProgress) {
     DirectionsRoute currentRoute = routeProgress.directionsRoute();
-    List<DirectionsRoute> directionsRoutes = mapRoute.retrieveDirectionsRoutes();
-    int primaryRouteIndex = mapRoute.retrievePrimaryRouteIndex();
+    List<DirectionsRoute> directionsRoutes = routeLine.retrieveDirectionsRoutes();
+    int primaryRouteIndex = routeLine.retrievePrimaryRouteIndex();
     addNewRoute(currentRoute, directionsRoutes, primaryRouteIndex);
-    mapRoute.addUpcomingManeuverArrow(routeProgress);
+    routeArrow.addUpcomingManeuverArrow(routeProgress);
   }
 
   private void addNewRoute(DirectionsRoute currentRoute, List<DirectionsRoute> directionsRoutes,
                            int primaryRouteIndex) {
     if (isANewRoute(currentRoute, directionsRoutes, primaryRouteIndex)) {
-      mapRoute.addRoute(currentRoute);
+      routeLine.draw(currentRoute);
     }
   }
 
