@@ -35,6 +35,7 @@ import com.mapbox.services.android.navigation.v5.milestone.BannerInstructionMile
 import com.mapbox.services.android.navigation.v5.milestone.Milestone;
 import com.mapbox.services.android.navigation.v5.milestone.MilestoneEventListener;
 import com.mapbox.services.android.navigation.v5.milestone.VoiceInstructionMilestone;
+import com.mapbox.services.android.navigation.v5.navigation.VoiceInstructionLoader;
 import com.mapbox.services.android.navigation.v5.navigation.MapboxNavigation;
 import com.mapbox.services.android.navigation.v5.navigation.MapboxNavigationOptions;
 import com.mapbox.services.android.navigation.v5.navigation.NavigationEventListener;
@@ -181,12 +182,12 @@ public class NavigationViewModel extends AndroidViewModel {
     initializeLanguage(options);
     initializeTimeFormat(navigationOptions);
     initializeDistanceFormatter(options);
-    initializeNavigationSpeechPlayer(options);
     if (!isRunning) {
       LocationEngine locationEngine = initializeLocationEngineFrom(options);
       initializeNavigation(getApplication(), navigationOptions, locationEngine);
       addMilestones(options);
     }
+    initializeNavigationSpeechPlayer(options);
     navigationViewRouteEngine.extractRouteOptions(options);
     return navigation;
   }
@@ -263,7 +264,8 @@ public class NavigationViewModel extends AndroidViewModel {
 
   @NonNull
   private SpeechPlayerProvider initializeSpeechPlayerProvider(boolean voiceLanguageSupported) {
-    return new SpeechPlayerProvider(getApplication(), language, voiceLanguageSupported, accessToken);
+    VoiceInstructionLoader voiceInstructionLoader = navigation.retrieveInstructionLoader();
+    return new SpeechPlayerProvider(getApplication(), language, voiceLanguageSupported, voiceInstructionLoader);
   }
 
   private LocationEngine initializeLocationEngineFrom(NavigationViewOptions options) {

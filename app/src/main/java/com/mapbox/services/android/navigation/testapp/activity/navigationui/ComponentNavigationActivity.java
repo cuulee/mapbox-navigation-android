@@ -43,6 +43,7 @@ import com.mapbox.services.android.navigation.ui.v5.voice.SpeechPlayerProvider;
 import com.mapbox.services.android.navigation.v5.milestone.Milestone;
 import com.mapbox.services.android.navigation.v5.milestone.MilestoneEventListener;
 import com.mapbox.services.android.navigation.v5.milestone.VoiceInstructionMilestone;
+import com.mapbox.services.android.navigation.v5.navigation.VoiceInstructionLoader;
 import com.mapbox.services.android.navigation.v5.navigation.MapboxNavigation;
 import com.mapbox.services.android.navigation.v5.navigation.NavigationRoute;
 import com.mapbox.services.android.navigation.v5.offroute.OffRouteListener;
@@ -124,15 +125,15 @@ public class ComponentNavigationActivity extends HistoryActivity implements OnMa
     mapState = MapState.INFO;
     navigationMap = new NavigationMapboxMap(mapView, mapboxMap);
 
-    // For voice instructions
-    initializeSpeechPlayer();
-
     // For Location updates
     initializeLocationEngine();
 
     // For navigation logic / processing
     initializeNavigation(mapboxMap);
     navigationMap.updateCameraTrackingMode(NavigationCamera.NAVIGATION_TRACKING_MODE_NONE);
+
+    // For voice instructions
+    initializeSpeechPlayer();
   }
 
   @Override
@@ -312,8 +313,9 @@ public class ComponentNavigationActivity extends HistoryActivity implements OnMa
 
   private void initializeSpeechPlayer() {
     String english = Locale.US.getLanguage();
-    String accessToken = Mapbox.getAccessToken();
-    SpeechPlayerProvider speechPlayerProvider = new SpeechPlayerProvider(getApplication(), english, true, accessToken);
+    VoiceInstructionLoader voiceInstructionLoader = navigation.retrieveInstructionLoader();
+    SpeechPlayerProvider speechPlayerProvider = new SpeechPlayerProvider(getApplication(), english, true,
+      voiceInstructionLoader);
     speechPlayer = new NavigationSpeechPlayer(speechPlayerProvider);
   }
 

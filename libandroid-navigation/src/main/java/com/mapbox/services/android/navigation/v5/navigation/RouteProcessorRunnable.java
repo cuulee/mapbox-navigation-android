@@ -4,8 +4,12 @@ import android.location.Location;
 import android.os.Handler;
 
 import com.mapbox.api.directions.v5.models.DirectionsRoute;
+import com.mapbox.api.directions.v5.models.LegStep;
+import com.mapbox.api.directions.v5.models.RouteLeg;
+import com.mapbox.api.directions.v5.models.VoiceInstructions;
 import com.mapbox.navigator.NavigationStatus;
 import com.mapbox.services.android.navigation.v5.milestone.Milestone;
+import com.mapbox.services.android.navigation.v5.milestone.VoiceInstructionMilestone;
 import com.mapbox.services.android.navigation.v5.offroute.OffRoute;
 import com.mapbox.services.android.navigation.v5.offroute.OffRouteDetector;
 import com.mapbox.services.android.navigation.v5.route.FasterRoute;
@@ -17,15 +21,25 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
+import timber.log.Timber;
+
 class RouteProcessorRunnable implements Runnable {
 
   private static final int ONE_SECOND_IN_MILLISECONDS = 1000;
+  private static final int MAX_VOICE_INSTRUCTIONS_TO_CACHE = 10;
+  private static final int VOICE_INSTRUCTIONS_TO_CACHE_THRESHOLD = 5;
   private final NavigationRouteProcessor routeProcessor;
   private final MapboxNavigation navigation;
   private final Handler workerHandler;
   private final Handler responseHandler;
   private final RouteProcessorBackgroundThread.Listener listener;
   private Location rawLocation;
+  private VoiceInstructionLoader voiceInstructionLoader;
+  private int voiceInstructionsToAnnounce = 0;
+  private int totalVoiceInstructions = 0;
+  private int currentVoiceInstructionsCachedIndex = 0;
+  private boolean isFirstRoute = false;
+  private boolean isVoiceInstructionsToCacheThresholdReached = false;
 
   RouteProcessorRunnable(NavigationRouteProcessor routeProcessor,
                          MapboxNavigation navigation,
@@ -37,6 +51,7 @@ class RouteProcessorRunnable implements Runnable {
     this.workerHandler = workerHandler;
     this.responseHandler = responseHandler;
     this.listener = listener;
+    this.voiceInstructionLoader = navigation.retrieveInstructionLoader();
   }
 
   @Override
@@ -101,13 +116,74 @@ class RouteProcessorRunnable implements Runnable {
     if (previousRouteProgress == null) {
       previousRouteProgress = routeProgress;
     }
+    cacheInstructions(previousRouteProgress, routeProgress, mapboxNavigation.retrieveMapboxNavigator());
     List<Milestone> milestones = new ArrayList<>();
     for (Milestone milestone : mapboxNavigation.getMilestones()) {
       if (milestone.isOccurring(previousRouteProgress, routeProgress)) {
         milestones.add(milestone);
+        if (milestone instanceof VoiceInstructionMilestone) {
+          voiceInstructionsToAnnounce++;
+          Timber.d("DEBUG voiceInstructionsToAnnounce " + voiceInstructionsToAnnounce);
+          if (voiceInstructionsToAnnounce % VOICE_INSTRUCTIONS_TO_CACHE_THRESHOLD == 0) {
+            Timber.d("DEBUG voice instructions to announce threshold reached!");
+            isVoiceInstructionsToCacheThresholdReached = true;
+          }
+        }
       }
     }
     return milestones;
+  }
+
+  private void cacheInstructions(RouteProgress previousRouteProgress, RouteProgress routeProgress,
+                                 MapboxNavigator mapboxNavigator) {
+    DirectionsRoute previousRoute = previousRouteProgress.directionsRoute();
+    DirectionsRoute currentRoute = routeProgress.directionsRoute();
+    if ((!isFirstRoute && previousRouteProgress.equals(routeProgress)) || !previousRoute.equals(currentRoute)) {
+      isFirstRoute = true;
+      voiceInstructionsToAnnounce = 0;
+      totalVoiceInstructions = 0;
+      currentVoiceInstructionsCachedIndex = 0;
+      isVoiceInstructionsToCacheThresholdReached = false;
+      for (int i = 0; i < currentRoute.legs().size(); i++) {
+        RouteLeg leg = currentRoute.legs().get(i);
+        for (int j = 0; j < leg.steps().size(); j++) {
+          LegStep step = leg.steps().get(j);
+          for (VoiceInstructions ignored : step.voiceInstructions()) {
+            totalVoiceInstructions++;
+          }
+        }
+      }
+      Timber.d("DEBUG totalVoiceInstructions " + totalVoiceInstructions);
+      List<String> voiceInstructionsToCache = new ArrayList<>();
+      for (int i = currentVoiceInstructionsCachedIndex; i < totalVoiceInstructions; i++) {
+        voiceInstructionsToCache.add(mapboxNavigator.retrieveVoiceInstruction(i).getSsmlAnnouncement());
+        currentVoiceInstructionsCachedIndex++;
+        Timber.d("DEBUG currentVoiceInstructionsCachedIndex++ " + currentVoiceInstructionsCachedIndex);
+        if ((currentVoiceInstructionsCachedIndex + 1) % MAX_VOICE_INSTRUCTIONS_TO_CACHE == 0) {
+          Timber.d("DEBUG current voice instructions cached index threshold reached!");
+          break;
+        }
+      }
+      voiceInstructionLoader.cacheInstructions(voiceInstructionsToCache);
+    }
+    if (isVoiceInstructionsToCacheThresholdReached) {
+      Timber.d("DEBUG isVoiceInstructionsToCacheThresholdReached");
+      isVoiceInstructionsToCacheThresholdReached = false;
+      voiceInstructionLoader.evictVoiceInstructions();
+      List<String> voiceInstructionsToCache = new ArrayList<>();
+      for (int i = currentVoiceInstructionsCachedIndex; i < totalVoiceInstructions; i++) {
+        voiceInstructionsToCache.add(mapboxNavigator.retrieveVoiceInstruction(i).getSsmlAnnouncement());
+        currentVoiceInstructionsCachedIndex++;
+        Timber.d("DEBUG isVoiceInstructionsToCacheThresholdReached currentVoiceInstructionsCachedIndex++ "
+          + currentVoiceInstructionsCachedIndex);
+        if ((currentVoiceInstructionsCachedIndex + 1) % MAX_VOICE_INSTRUCTIONS_TO_CACHE == 0) {
+          Timber.d("DEBUG isVoiceInstructionsToCacheThresholdReached current voice instructions cached index "
+            + "threshold reached!");
+          break;
+        }
+      }
+      voiceInstructionLoader.cacheInstructions(voiceInstructionsToCache);
+    }
   }
 
   private void sendUpdateToResponseHandler(final boolean userOffRoute, final List<Milestone> milestones,

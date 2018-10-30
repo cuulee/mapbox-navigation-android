@@ -64,6 +64,7 @@ public class MapboxNavigation implements ServiceConnection {
   private final String accessToken;
   private Context applicationContext;
   private boolean isBound;
+  private VoiceInstructionLoader voiceInstructionLoader = null;
 
   static {
     NavigationLibraryLoader.load();
@@ -718,6 +719,10 @@ public class MapboxNavigation implements ServiceConnection {
     mapboxNavigator.toggleHistory(isEnabled);
   }
 
+  public VoiceInstructionLoader retrieveInstructionLoader() {
+    return voiceInstructionLoader;
+  }
+
   @Override
   public void onServiceConnected(ComponentName name, IBinder service) {
     Timber.d("Connected to service.");
@@ -783,6 +788,7 @@ public class MapboxNavigation implements ServiceConnection {
    * to prevent users from removing it.
    */
   private void initialize() {
+    voiceInstructionLoader = provideInstructionLoader();
     // Initialize event dispatcher and add internal listeners
     mapboxNavigator = new MapboxNavigator(new Navigator());
     navigationEventDispatcher = new NavigationEventDispatcher();
@@ -804,6 +810,14 @@ public class MapboxNavigation implements ServiceConnection {
     }
     applicationContext = context.getApplicationContext();
   }
+
+  private VoiceInstructionLoader provideInstructionLoader() {
+    if (voiceInstructionLoader == null) {
+      voiceInstructionLoader = new VoiceInstructionLoader(applicationContext, accessToken);
+    }
+    return voiceInstructionLoader;
+  }
+
 
   private void initializeTelemetry() {
     navigationTelemetry = obtainTelemetry();

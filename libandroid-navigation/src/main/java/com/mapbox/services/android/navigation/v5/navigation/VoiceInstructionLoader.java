@@ -1,202 +1,145 @@
 package com.mapbox.services.android.navigation.v5.navigation;
 
-import android.support.annotation.NonNull;
-import android.support.annotation.Nullable;
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 
-import com.google.auto.value.AutoValue;
-import com.mapbox.api.directions.v5.models.LegStep;
-import com.mapbox.api.directions.v5.models.VoiceInstructions;
 import com.mapbox.api.speech.v1.MapboxSpeech;
-import com.mapbox.services.android.navigation.v5.routeprogress.RouteProgress;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import okhttp3.Cache;
+import okhttp3.CacheControl;
+import okhttp3.Interceptor;
+import okhttp3.Request;
+import okhttp3.Response;
 import okhttp3.ResponseBody;
 import retrofit2.Call;
 import retrofit2.Callback;
-import retrofit2.Response;
+import timber.log.Timber;
 
-@AutoValue
-public abstract class VoiceInstructionLoader {
-  private static final int NUMBER_TO_CACHE = 3;
-  private static final int CACHE_INDEX = NUMBER_TO_CACHE - 1;
-  private static VoiceInstructionLoader instance = null;
+public class VoiceInstructionLoader {
+  private static final String OKHTTP_INSTRUCTION_CACHE = "okhttp-instruction-cache";
+  private static final long TEN_MEGABYTE_CACHE_SIZE = 10 * 1024 * 1024;
+  private static final int VOICE_INSTRUCTIONS_TO_EVICT_THRESHOLD = 4;
+  private static final String SSML_TEXT_TYPE = "ssml";
+  private ConnectivityManager connectivityManager;
+  private String accessToken;
+  private Cache cache;
+  private MapboxSpeech.Builder mapboxSpeechBuilder = null;
+  private List<String> urlsCached;
 
-  /**
-   * Returns the singleton instance of VoiceInstructionLoader. It must first be initialized through
-   * a builder.
-   *
-   * @return current instance if it's initialized, or null
-   */
-  public static synchronized VoiceInstructionLoader getInstance() {
-    return instance;
+  public VoiceInstructionLoader(Context context, String accessToken) {
+    this.connectivityManager = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+    this.accessToken = accessToken;
+    this.urlsCached = new ArrayList<>();
+    setup(context);
   }
 
-  /**
-   * Makes the call to MapboxSpeech to get the given string instruction as a sound file.
-   *
-   * @param instruction text to dictate
-   * @param textType "ssml" or "text"
-   * @param callback to relay retrofit status
-   */
-  public void getInstruction(String instruction, String textType, Callback<ResponseBody> callback) {
-    getMapboxBuilder()
+  public void setupMapboxSpeechBuilder(String language) {
+    if (mapboxSpeechBuilder == null) {
+      mapboxSpeechBuilder = MapboxSpeech.builder()
+        .accessToken(accessToken)
+        .language(language)
+        .cache(cache)
+        .interceptor(provideOfflineCacheInterceptor());
+    }
+  }
+
+  public void requestInstruction(String instruction, String textType, Callback<ResponseBody> callback) {
+    MapboxSpeech mapboxSpeech = mapboxSpeechBuilder
       .instruction(instruction)
       .textType(textType)
-      .build()
-      .enqueueCall(callback);
+      .build();
+    mapboxSpeech.enableDebug(true);
+    mapboxSpeech.enqueueCall(callback);
   }
 
-  /**
-   * Makes call to MapboxSpeech with empty callbacks. This is so that the result is cached in the
-   * cache specified in the builder.
-   *
-   * @param routeProgress to get instructions from
-   * @param isFirst whether this is the first call. This way, if we're caching three ahead, on the
-   *                first call the first two instructions will also be cached.
-   */
-  public void cacheInstructions(RouteProgress routeProgress, boolean isFirst) {
-    List<VoiceInstructions> voiceInstructionsList = getNextInstructions(routeProgress);
+  public void evictVoiceInstructions() {
+    List<String> urlsToRemove = new ArrayList<>();
+    for (int i = 0; i < urlsCached.size() && i < VOICE_INSTRUCTIONS_TO_EVICT_THRESHOLD; i++) {
+      String urlToRemove = urlsCached.get(i);
+      try {
+        Iterator<String> urlsCurrentlyCached = cache.urls();
+        for (Iterator<String> urlCached = urlsCurrentlyCached; urlCached.hasNext(); ) {
+          String url = urlCached.next();
+          if (url.equals(urlToRemove)) {
+            urlCached.remove();
+            urlsToRemove.add(urlToRemove);
+            Timber.d("DEBUG url to evict " + urlToRemove);
+          }
+        }
+      } catch (IOException exception) {
+        exception.printStackTrace();
+      }
+    }
+    urlsCached.removeAll(urlsToRemove);
+  }
 
-    if (isFirst) {
-      cacheUpToNthInstruction(voiceInstructionsList, CACHE_INDEX);
-    } else {
-      cacheNthInstruction(voiceInstructionsList, CACHE_INDEX);
+  public void flushCache() {
+    try {
+      cache.delete();
+    } catch (IOException exception) {
+      Timber.e(exception);
     }
   }
 
-  private void cacheUpToNthInstruction(List<VoiceInstructions> voiceInstructionsList, int exclusiveIndex) {
-    for (int i = 0; i < exclusiveIndex; i++) {
-      cacheNthInstruction(voiceInstructionsList, i);
-    }
-  }
-
-  private void cacheNthInstruction(List<VoiceInstructions> voiceInstructionsList, int index) {
-    if (voiceInstructionsList.size() > index) {
-      cacheInstruction(voiceInstructionsList.get(index).ssmlAnnouncement());
+  public void cacheInstructions(List<String> instructions) {
+    for (String instruction : instructions) {
+      cacheInstruction(instruction);
     }
   }
 
   private void cacheInstruction(String instruction) {
-    getMapboxBuilder().instruction(instruction).build().enqueueCall(new Callback<ResponseBody>() {
+    requestInstruction(instruction, SSML_TEXT_TYPE, new Callback<ResponseBody>() {
       @Override
-      public void onResponse(Call<ResponseBody> call, Response<ResponseBody> response) {
-        // Intentionally empty
+      public void onResponse(Call<ResponseBody> call, retrofit2.Response<ResponseBody> response) {
+        response.body().byteStream();
+        response.body().close();
+        urlsCached.add(call.request().url().toString());
+        Timber.d("DEBUG url to cache " + call.request().url().toString());
       }
 
       @Override
       public void onFailure(Call<ResponseBody> call, Throwable throwable) {
-        // Intentionally empty
+        Timber.e("onFailure cache instruction");
       }
     });
   }
 
-  @Nullable
-  abstract String language();
-
-  @Nullable
-  abstract String textType();
-
-  @Nullable
-  abstract String outputType();
-
-  @Nullable
-  abstract Cache cache();
-
-  @NonNull
-  abstract String accessToken();
-
-  private MapboxSpeech.Builder getMapboxBuilder() {
-    MapboxSpeech.Builder builder = MapboxSpeech.builder().accessToken(accessToken());
-
-    if (language() != null) {
-      builder.language(language());
-    }
-    if (textType() != null) {
-      builder.textType(textType());
-    }
-    if (outputType() != null) {
-      builder.outputType(outputType());
-    }
-    if (cache() != null) {
-      builder.cache(cache());
-    }
-
-    return builder;
+  private void setup(Context context) {
+    cache = new Cache(new File(context.getCacheDir(), OKHTTP_INSTRUCTION_CACHE), TEN_MEGABYTE_CACHE_SIZE);
   }
 
-  private List<VoiceInstructions> getNextInstructions(RouteProgress routeProgress) {
-    int stepIndex = routeProgress.currentLegProgress().stepIndex();
-    List<LegStep> steps = routeProgress.currentLeg().steps();
-    List<VoiceInstructions> instructions = new ArrayList<>();
-
-    while (instructions.size() < NUMBER_TO_CACHE && stepIndex < steps.size()) {
-      List<VoiceInstructions> currentStepInstructions = steps.get(stepIndex++).voiceInstructions();
-      if (currentStepInstructions.size() <= NUMBER_TO_CACHE) {
-        instructions.addAll(currentStepInstructions);
-      } else {
-        instructions.addAll(currentStepInstructions.subList(0, NUMBER_TO_CACHE));
+  private Interceptor provideOfflineCacheInterceptor() {
+    return new Interceptor() {
+      @Override
+      public Response intercept(Chain chain) throws IOException {
+        Request request = chain.request();
+        if (!hasNetworkConnection()) {
+          CacheControl cacheControl = new CacheControl.Builder()
+            .maxStale(3, TimeUnit.DAYS)
+            .build();
+          request = request.newBuilder()
+            .cacheControl(cacheControl)
+            .build();
+        }
+        return chain.proceed(request);
       }
-    }
-
-    return instructions;
+    };
   }
 
-
-  @AutoValue.Builder
-  public abstract static class Builder {
-    /**
-     * Language of which to request the instructions be spoken. Default is "en-us"
-     *
-     * @param language as a string, i.e., "en-us"
-     * @return this builder for chaining options together
-     */
-    public abstract Builder language(String language);
-
-    /**
-     * Format which the input is specified. If not specified, default is text
-     *
-     * @param textType either text or ssml
-     * @return this builder for chaining options together
-     */
-    public abstract Builder textType(String textType);
-
-    /**
-     * Output format for spoken instructions. If not specified, default is mp3
-     *
-     * @param outputType either mp3 or json
-     * @return this builder for chaining options together
-     */
-    public abstract Builder outputType(String outputType);
-
-    /**
-     * Required to call when this is being built.
-     *
-     * @param accessToken Mapbox access token, You must have a Mapbox account in order to use
-     *                    the Optimization API
-     * @return this builder for chaining options together
-     */
-    public abstract Builder accessToken(@NonNull String accessToken);
-
-    /**
-     * Adds an optional cache to set in the OkHttp client.
-     *
-     * @param cache to set for OkHttp
-     * @return this builder for chaining options together
-     */
-    public abstract Builder cache(Cache cache);
-
-    abstract VoiceInstructionLoader autoBuild();
-
-    public VoiceInstructionLoader build() {
-      instance = autoBuild();
-      return instance;
+  @SuppressWarnings( {"MissingPermission"})
+  private boolean hasNetworkConnection() {
+    if (connectivityManager == null) {
+      return false;
     }
-  }
-
-  public static Builder builder() {
-    return new AutoValue_VoiceInstructionLoader.Builder();
+    NetworkInfo activeNetwork = connectivityManager.getActiveNetworkInfo();
+    return activeNetwork != null && activeNetwork.isConnected();
   }
 }

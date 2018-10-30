@@ -2,6 +2,8 @@ package com.mapbox.services.android.navigation.ui.v5.voice;
 
 import android.content.Context;
 
+import com.mapbox.services.android.navigation.v5.navigation.VoiceInstructionLoader;
+
 import org.junit.Test;
 
 import java.util.Locale;
@@ -51,6 +53,7 @@ public class SpeechPlayerProviderTest {
   private SpeechPlayerProvider buildSpeechPlayerProvider(boolean voiceLanguageSupported) {
     Context context = mock(Context.class);
     String language = Locale.US.getLanguage();
-    return new SpeechPlayerProvider(context, language, voiceLanguageSupported, "PK.XXX");
+    VoiceInstructionLoader voiceInstructionLoader = mock(VoiceInstructionLoader.class);
+    return new SpeechPlayerProvider(context, language, voiceLanguageSupported, voiceInstructionLoader);
   }
 }
