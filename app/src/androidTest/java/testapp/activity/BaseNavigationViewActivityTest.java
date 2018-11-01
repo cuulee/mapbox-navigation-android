@@ -2,6 +2,7 @@ package testapp.activity;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.res.AssetManager;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.support.test.espresso.IdlingRegistry;
@@ -25,20 +26,23 @@ import static android.support.test.espresso.assertion.ViewAssertions.matches;
 import static android.support.test.espresso.matcher.ViewMatchers.isDisplayed;
 import static android.support.test.espresso.matcher.ViewMatchers.withId;
 
-public abstract class BaseNavigationActivityTest {
+public abstract class BaseNavigationViewActivityTest {
 
   @Rule
   public ActivityTestRule<Activity> rule = new ActivityTestRule<>(getActivityClass());
   private NavigationView navigationView;
+  private AssetManager assetManager;
   private OnNavigationReadyIdlingResource idlingResource;
 
   @Before
   public void beforeTest() {
     try {
-      idlingResource = new OnNavigationReadyIdlingResource(rule.getActivity());
+      Activity activity = rule.getActivity();
+      idlingResource = new OnNavigationReadyIdlingResource(activity);
       IdlingRegistry.getInstance().register(idlingResource);
       checkViewIsDisplayed(R.id.navigationView);
       navigationView = idlingResource.getNavigationView();
+      assetManager = activity.getAssets();
     } catch (IdlingResourceTimeoutException idlingResourceTimeoutException) {
       Timber.e("Idling resource timed out. Could not validate if navigation is ready.");
       throw new RuntimeException("Could not start test for " + getActivityClass().getSimpleName() + ".\n"
@@ -53,6 +57,10 @@ public abstract class BaseNavigationActivityTest {
 
   protected NavigationView getNavigationView() {
     return navigationView;
+  }
+
+  protected AssetManager getAssetManager() {
+    return assetManager;
   }
 
   protected abstract Class getActivityClass();

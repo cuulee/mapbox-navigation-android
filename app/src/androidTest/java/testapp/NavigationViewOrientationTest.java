@@ -4,12 +4,13 @@ import android.content.res.Configuration;
 import android.support.test.espresso.ViewAction;
 
 import com.mapbox.services.android.navigation.testapp.R;
-import com.mapbox.services.android.navigation.testapp.test.TestNavigationActivity;
+import com.mapbox.services.android.navigation.testapp.test.TestNavigationViewActivity;
 import com.mapbox.services.android.navigation.ui.v5.map.NavigationMapboxMap;
 
+import org.junit.Ignore;
 import org.junit.Test;
 
-import testapp.activity.BaseNavigationActivityTest;
+import testapp.activity.BaseNavigationViewActivityTest;
 
 import static android.support.test.espresso.Espresso.onView;
 import static android.support.test.espresso.action.ViewActions.click;
@@ -22,11 +23,12 @@ import static junit.framework.Assert.assertFalse;
 import static testapp.action.OrientationChangeAction.orientationLandscape;
 import static testapp.action.OrientationChangeAction.orientationPortrait;
 
-public class NavigationViewOrientationTest extends BaseNavigationActivityTest {
+@Ignore
+public class NavigationViewOrientationTest extends BaseNavigationViewActivityTest {
 
   @Override
   protected Class getActivityClass() {
-    return TestNavigationActivity.class;
+    return TestNavigationViewActivity.class;
   }
 
   @Test
